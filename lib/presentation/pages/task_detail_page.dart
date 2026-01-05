@@ -20,6 +20,20 @@ class TaskDetailPage extends StatefulWidget {
 class _TaskDetailPageState extends State<TaskDetailPage> {
   TextEditingController? _noteC;
 
+  bool _isOverdue(Task t) {
+    if (t.isDone) return false;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final due = DateTime(t.deadline.year, t.deadline.month, t.deadline.day);
+    return due.isBefore(today);
+  }
+
+  TaskStatus _statusForUi(Task t) {
+    if (t.isDone) return TaskStatus.selesai;
+    if (_isOverdue(t)) return TaskStatus.terlambat;
+    return TaskStatus.berjalan;
+  }
+
   @override
   void dispose() {
     _noteC?.dispose();
@@ -28,7 +42,8 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final id = ModalRoute.of(context)!.settings.arguments as String;
+    final id = ModalRoute.of(context)!.settings.arguments as int;
+
     final c = context.watch<TaskController>();
     final t = c.findById(id);
 
@@ -37,6 +52,8 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
     }
 
     _noteC ??= TextEditingController(text: t.note);
+
+    final uiStatus = _statusForUi(t);
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -49,29 +66,51 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
           onPressed: () => Navigator.pop(context),
         ),
         centerTitle: true,
-        title: Text('Detail Tugas', style: AppTypography.subtitle.copyWith(fontSize: 16)),
+        title: Text(
+          'Detail Tugas',
+          style: AppTypography.subtitle.copyWith(fontSize: 16),
+        ),
         actions: const [
           Padding(
             padding: EdgeInsets.only(right: 12),
             child: Center(
               child: Text('Edit', style: TextStyle(color: AppColors.primary)),
             ),
-          )
+          ),
         ],
       ),
 
-      // tombol fixed bawah
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.md, 8, AppSpacing.md, AppSpacing.md),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            8,
+            AppSpacing.md,
+            AppSpacing.md,
+          ),
           child: DsButton(
-            text: 'Simpan Perubahan',
-            onPressed: () {
-              c.updateNote(id, _noteC!.text);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Perubahan disimpan')),
-              );
-            },
+            text: c.loading ? 'Menyimpan...' : 'Simpan Perubahan',
+            onPressed: c.loading
+                ? null
+                : () async {
+                    try {
+                      await context.read<TaskController>().updateNoteRemote(
+                        id,
+                        _noteC!.text,
+                      );
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Perubahan disimpan')),
+                      );
+                    } catch (_) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Gagal menyimpan perubahan'),
+                        ),
+                      );
+                    }
+                  },
           ),
         ),
       ),
@@ -94,20 +133,17 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
                         const SizedBox(height: 4),
                         Text(t.title, style: AppTypography.subtitle),
                         const SizedBox(height: 12),
-
                         Text('Mata Kuliah', style: AppTypography.muted),
                         const SizedBox(height: 4),
                         Text(t.course, style: AppTypography.body),
                         const SizedBox(height: 12),
-
                         Text('Deadline', style: AppTypography.muted),
                         const SizedBox(height: 4),
                         Text(_fmtDate(t.deadline), style: AppTypography.body),
                         const SizedBox(height: 12),
-
                         Text('Status', style: AppTypography.muted),
                         const SizedBox(height: 8),
-                        StatusPill(status: t.status),
+                        StatusPill(status: uiStatus),
                       ],
                     ),
                   ),
@@ -123,8 +159,23 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Checkbox(
-                    value: t.status == TaskStatus.selesai,
-                    onChanged: (v) => c.toggleStatus(id, v ?? false),
+                    value: t.isDone,
+                    onChanged: c.loading
+                        ? null
+                        : (v) async {
+                            try {
+                              await context
+                                  .read<TaskController>()
+                                  .toggleDoneRemote(id, v ?? false);
+                            } catch (_) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Gagal update status'),
+                                ),
+                              );
+                            }
+                          },
                   ),
                   const SizedBox(width: 6),
                   Expanded(
@@ -133,7 +184,10 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
                       children: [
                         Text('Tugas sudah selesai', style: AppTypography.body),
                         const SizedBox(height: 2),
-                        Text('Centang jika tugas sudah final.', style: AppTypography.muted),
+                        Text(
+                          'Centang jika tugas sudah final.',
+                          style: AppTypography.muted,
+                        ),
                       ],
                     ),
                   ),
@@ -141,7 +195,6 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
               ),
 
               const SizedBox(height: 14),
-
               Text('Catatan', style: AppTypography.subtitle),
               const SizedBox(height: 10),
 
@@ -155,7 +208,6 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
                 ),
               ),
 
-              // ruang supaya tidak ketutup tombol bawah
               const SizedBox(height: 120),
             ],
           ),
@@ -165,7 +217,20 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
   }
 
   String _fmtDate(DateTime d) {
-    const m = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    const m = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'Mei',
+      'Jun',
+      'Jul',
+      'Agu',
+      'Sep',
+      'Okt',
+      'Nov',
+      'Des',
+    ];
     return '${d.day.toString().padLeft(2, '0')} ${m[d.month - 1]} ${d.year}';
   }
 }

@@ -3,12 +3,11 @@ import 'package:provider/provider.dart';
 
 import '../../config/app_routes.dart';
 import '../../controllers/task_controller.dart';
+import '../../design_system/app_colors.dart';
 import '../../design_system/app_spacing.dart';
 import '../../design_system/app_typography.dart';
 import '../../models/task.dart';
 import '../widgets/task_tile.dart';
-
-enum TaskFilter { semua, berjalan, selesai, terlambat }
 
 class TaskListPage extends StatefulWidget {
   const TaskListPage({super.key});
@@ -19,7 +18,13 @@ class TaskListPage extends StatefulWidget {
 
 class _TaskListPageState extends State<TaskListPage> {
   final _searchC = TextEditingController();
-  TaskFilter _filter = TaskFilter.semua;
+  TaskStatus? _tab; // null = semua
+
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() => context.read<TaskController>().loadAll());
+  }
 
   @override
   void dispose() {
@@ -27,41 +32,98 @@ class _TaskListPageState extends State<TaskListPage> {
     super.dispose();
   }
 
+  bool _isOverdue(Task t) {
+    if (t.isDone) return false;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final due = DateTime(t.deadline.year, t.deadline.month, t.deadline.day);
+    return due.isBefore(today);
+  }
+
+  List<Task> _applyFilter(List<Task> tasks) {
+    // ✅ buat list growable agar boleh sort
+    List<Task> out = tasks.toList(growable: true);
+
+    if (_tab == TaskStatus.selesai) {
+      out = out.where((t) => t.isDone).toList(growable: true);
+    } else if (_tab == TaskStatus.terlambat) {
+      out = out.where(_isOverdue).toList(growable: true);
+    } else if (_tab == TaskStatus.berjalan) {
+      out = out
+          .where((t) => !t.isDone && !_isOverdue(t))
+          .toList(growable: true);
+    }
+
+    final q = _searchC.text.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      out = out
+          .where(
+            (t) =>
+                t.title.toLowerCase().contains(q) ||
+                t.course.toLowerCase().contains(q),
+          )
+          .toList(growable: true);
+    }
+
+    // ✅ SORT aman
+    out.sort((a, b) => a.deadline.compareTo(b.deadline));
+    return out;
+  }
+
+  Widget _chip(String text, TaskStatus? value) {
+    final selected = _tab == value;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: () => setState(() => _tab = value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.primary.withOpacity(0.14)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (selected) ...[
+              const Icon(Icons.check, size: 16),
+              const SizedBox(width: 6),
+            ],
+            Text(text, style: AppTypography.body),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.watch<TaskController>();
-    final now = DateTime.now();
-    final q = _searchC.text.trim().toLowerCase();
-
-    final filtered = c.tasks.where((t) {
-      final matchSearch = q.isEmpty ||
-          t.title.toLowerCase().contains(q) ||
-          t.course.toLowerCase().contains(q);
-
-      bool matchFilter = true;
-      switch (_filter) {
-        case TaskFilter.semua:
-          matchFilter = true;
-          break;
-        case TaskFilter.berjalan:
-          matchFilter = t.status == TaskStatus.berjalan;
-          break;
-        case TaskFilter.selesai:
-          matchFilter = t.status == TaskStatus.selesai;
-          break;
-        case TaskFilter.terlambat:
-          matchFilter = t.status != TaskStatus.selesai && t.deadline.isBefore(now);
-          break;
-      }
-      return matchSearch && matchFilter;
-    }).toList();
+    final tasks = _applyFilter(c.tasks);
 
     return Scaffold(
+      backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: Text('Daftar Tugas', style: AppTypography.title),
+        backgroundColor: AppColors.bg,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        centerTitle: true,
+        title: Text(
+          'Daftar Tugas',
+          style: AppTypography.subtitle.copyWith(fontSize: 16),
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pushNamed(context, AppRoutes.form),
+            onPressed: () async {
+              await Navigator.pushNamed(context, AppRoutes.form);
+              if (mounted) context.read<TaskController>().loadAll();
+            },
             child: const Text('Tambah'),
           ),
         ],
@@ -74,57 +136,81 @@ class _TaskListPageState extends State<TaskListPage> {
               controller: _searchC,
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
-                hintText: 'Cari tugas atau mata kuliah...',
                 prefixIcon: const Icon(Icons.search),
+                hintText: 'Cari tugas atau mata kuliah...',
+                hintStyle: AppTypography.muted,
+                filled: true,
+                fillColor: Colors.white,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppSpacing.radius),
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: AppColors.border),
                 ),
               ),
             ),
-            const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: 12),
+
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _chip('Semua', TaskFilter.semua),
-                  _chip('Berjalan', TaskFilter.berjalan),
-                  _chip('Selesai', TaskFilter.selesai),
-                  _chip('Terlambat', TaskFilter.terlambat),
+                  _chip('Semua', null),
+                  const SizedBox(width: 8),
+                  _chip('Berjalan', TaskStatus.berjalan),
+                  const SizedBox(width: 8),
+                  _chip('Selesai', TaskStatus.selesai),
+                  const SizedBox(width: 8),
+                  _chip('Terlambat', TaskStatus.terlambat),
                 ],
               ),
             ),
-            const SizedBox(height: AppSpacing.md),
-            Expanded(
-              child: ListView.separated(
-                itemCount: filtered.length,
-                separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
-                itemBuilder: (_, i) {
-                  final t = filtered[i];
-                  return TaskTile(
-                    task: t,
-                    onTap: () => Navigator.pushNamed(
-                      context,
-                      AppRoutes.detail,
-                      arguments: t.id,
+            const SizedBox(height: 12),
+
+            if (c.loading)
+              const Expanded(child: Center(child: CircularProgressIndicator()))
+            else if (c.error != null)
+              Expanded(
+                child: Center(
+                  child: Text(
+                    c.error!,
+                    style: AppTypography.muted.copyWith(
+                      color: AppColors.danger,
                     ),
-                  );
-                },
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              )
+            else if (tasks.isEmpty)
+              Expanded(
+                child: Center(
+                  child: Text('Tidak ada data.', style: AppTypography.muted),
+                ),
+              )
+            else
+              Expanded(
+                child: ListView.builder(
+                  itemCount: tasks.length,
+                  itemBuilder: (_, i) {
+                    final t = tasks[i];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: TaskTile(
+                        task: t,
+                        onTap: () => Navigator.pushNamed(
+                          context,
+                          AppRoutes.detail,
+                          arguments: t.id,
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _chip(String label, TaskFilter value) {
-    final selected = _filter == value;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ChoiceChip(
-        label: Text(label),
-        selected: selected,
-        onSelected: (_) => setState(() => _filter = value),
       ),
     );
   }

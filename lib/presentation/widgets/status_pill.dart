@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+
 import '../../design_system/app_colors.dart';
-import '../../design_system/app_spacing.dart';
 import '../../design_system/app_typography.dart';
 import '../../models/task.dart';
 
@@ -15,15 +15,15 @@ class StatusPill extends StatelessWidget {
       case TaskStatus.selesai:
         text = 'Selesai';
         break;
-      case TaskStatus.berjalan:
-        text = 'Berjalan';
-        break;
       case TaskStatus.terlambat:
         text = 'Terlambat';
         break;
+      case TaskStatus.berjalan:
+      default:
+        text = 'Berjalan';
+        break;
     }
 
-    // warna default biru seperti desain (kalau mau beda untuk terlambat bisa ubah)
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
